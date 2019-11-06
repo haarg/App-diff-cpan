@@ -12,6 +12,7 @@ use Config ();
 use IPC::Open3 ();
 use Getopt::Long qw(:config gnu_getopt require_order pass_through);
 use Pod::Usage ();
+use Parse::CPAN::Meta ();
 
 sub run_capture {
   my @cmd = @_;
@@ -59,20 +60,15 @@ sub build {
 
 sub dist_name {
   my $dist_dir = shift;
-  my $dist;
-  if (my ($meta) = grep -e, map "$dist_dir/$_", qw(MYMETA.json META.json)) {
-    open my $fh, '<:raw', $meta
-      or die "can't read $meta: $!";
-    my $meta = do { local $/; <$fh> };
-    close $fh;
-    my $meta_data = JSON::PP::decode_json($meta);
-    $dist = $meta_data->{name};
+  if (my ($metafile) = grep -e, map "$dist_dir/$_", qw(MYMETA.json MYMETA.yml META.json META.yml)) {
+    my $meta = Parse::CPAN::Meta->load_file($metafile);
+    return $meta->{name};
   }
   else {
-    $dist = File::Basename::basename(Cwd::realpath($dist_dir));
+    my $dist = File::Basename::basename(Cwd::realpath($dist_dir));
     $dist =~ s/-v?[0-9]+(?:\.[0-9_]+)+(?:-TRIAL|-RC[0-9]+)\z//;
+    return $dist;
   }
-  return $dist;
 }
 
 Getopt::Long::GetOptions(
