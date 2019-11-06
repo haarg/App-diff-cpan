@@ -169,7 +169,12 @@ my $extracted_dir = do {
 };
 
 my $local_dir = do {
-  my $local_root = File::Spec->catdir($tempdir, 'local');
+  my $try_length = length($extracted_dir) - 1;
+  my $local_name = 'local';
+  my $local_length = length $local_name;
+  $local_name = (' ' x ($try_length - $local_length)) . $local_name
+    if $local_length < $try_length;
+  my $local_root = File::Spec->catdir($tempdir, $local_name);
   symlink $dist_dir, $local_root;
   File::Spec->abs2rel($local_root, $tempdir) . '/';
 };
