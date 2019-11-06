@@ -23,7 +23,7 @@ sub run_capture {
   my $output = do { local $/; <$out> };
   close $out;
   waitpid $pid, 0;
-  die "@cmd failed:$output"
+  die "@cmd failed:\n$output"
     if $?;
   return 1;
 }
@@ -126,7 +126,7 @@ else {
 my $extracted_dir = do {
   print "Finding latest release for $dist... ";
   my $dist_data = JSON::PP::decode_json($get->('https://fastapi.metacpan.org/v1/release/'.$dist));
-  my $download_url = $dist_data->{download_url} || die;
+  my $download_url = $dist_data->{download_url} || die "Unable to find latest release!\n";
 
   my $filename = $download_url;
   $filename =~ s{.*/}{};
