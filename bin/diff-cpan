@@ -2,14 +2,12 @@
 use strict;
 use warnings;
 
-use File::Find ();
 use File::Spec ();
 use File::Temp ();
 use File::Basename ();
 use JSON::PP ();
 use HTTP::Tiny ();
 use Cwd ();
-use Text::ParseWords ();
 use Config ();
 use IPC::Open3 ();
 use Getopt::Long qw(:config gnu_getopt require_order pass_through);
