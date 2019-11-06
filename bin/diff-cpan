@@ -1,0 +1,177 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+
+use File::Find ();
+use File::Spec ();
+use File::Temp ();
+use File::Basename ();
+use JSON::PP ();
+use HTTP::Tiny ();
+use Cwd ();
+use Text::ParseWords ();
+use Config ();
+use IPC::Open3 ();
+
+sub run_capture {
+  my @cmd = @_;
+  open my $in, '<', File::Spec->devnull
+    or die "can't open /dev/null: $!";
+  my $pid = IPC::Open3::open3($in, my $out, undef, @cmd)
+    or die "Failed to exec @cmd: $!";
+  my $output = do { local $/; <$out> };
+  close $out;
+  waitpid $pid, 0;
+  die "@cmd failed:$output"
+    if $?;
+  return 1;
+}
+
+sub build {
+  my $from = shift;
+  print "Building... ";
+  my $cwd = Cwd::cwd();
+  chdir $from;
+  my $to = File::Temp->newdir('dist-diff-build-XXXXXX', TMPDIR => 1, CLEANUP => 1);
+  eval {
+    if (-e 'dist.ini') {
+      run_capture 'dzil', 'build', '--no-tgz', '--in', $to;
+    }
+    elsif (-e 'Makefile.PL') {
+      -e 'Makefile' or run_capture $^X, 'Makefile.PL';
+      -e 'MANIFEST' or run_capture $Config::Config{make}, 'manifest';
+      run_capture $Config::Config{make}, 'distdir', "DISTVNAME=$to";
+    }
+    elsif (-e 'Build.PL') {
+      die "TODO: Module::Build building";
+    }
+    else {
+      die "Don't know how to build $from";
+    }
+  } or do {
+    my $e = $@;
+    chdir $cwd;
+    die $@;
+  };
+  print "\n";
+  return $to;
+}
+
+sub dist_name {
+  my $dist_dir = shift;
+  my $dist;
+  if (my ($meta) = grep -e, map "$dist_dir/$_", qw(MYMETA.json META.json)) {
+    open my $fh, '<:raw', $meta
+      or die "can't read $meta: $!";
+    my $meta = do { local $/; <$fh> };
+    close $fh;
+    my $meta_data = JSON::PP::decode_json($meta);
+    $dist = $meta_data->{name};
+  }
+  else {
+    $dist = File::Basename::basename(Cwd::realpath($dist_dir));
+    $dist =~ s/-v?[0-9]+(?:\.[0-9_]+)+(?:-TRIAL|-RC[0-9]+)\z//;
+  }
+  return $dist;
+}
+
+my $dist;
+my $dist_dir = $ARGV[0] && $ARGV[0] !~ /^-/ ? shift : undef;
+
+my $tempdir = File::Temp->newdir('dist-diff-XXXXXX', TMPDIR => 1);
+
+if ($dist_dir && -d $dist_dir) {
+  $dist_dir = Cwd::realpath($dist_dir);
+  $dist = dist_name($dist_dir);
+}
+elsif ($dist_dir) {
+  die "Don't know what to do with $dist_dir";
+}
+else {
+  $dist_dir = build('.');
+  $dist = dist_name($dist_dir);
+}
+
+my $get;
+if (HTTP::Tiny->can_ssl) {
+  $get = sub {
+    HTTP::Tiny->new->get(@_)->{content} || '';
+  };
+}
+else {
+  my $curl = `which curl`;
+  chomp $curl;
+  if (-x $curl) {
+    $get = sub {
+      open my $fh, '-|', 'curl', '-L', '--', @_;
+      scalar do { local $/; <$fh> };
+    };
+  }
+  else {
+    my $wget = `which wget`;
+    chomp $wget;
+    if (-x $get) {
+      $get = sub {
+        open my $fh, '-|', 'wget', '-O', '-', '--', @_;
+        scalar do { local $/; <$fh> };
+      };
+    }
+  }
+}
+
+my $extracted_dir = do {
+  print "Finding latest release for $dist... ";
+  my $dist_data = JSON::PP::decode_json($get->('https://fastapi.metacpan.org/v1/release/'.$dist));
+  my $download_url = $dist_data->{download_url} || die;
+
+  my $filename = $download_url;
+  $filename =~ s{.*/}{};
+
+  print "($filename)\n";
+
+  my $dist_file = File::Spec->catfile($tempdir, $filename);
+  my $extract_root = File::Spec->catdir($tempdir, 'cpan');
+  mkdir $extract_root;
+
+  print "Downloading... ";
+  {
+    open my $fh, '>:raw', $dist_file
+      or die "can't open $dist_file: $!";
+    print $fh $get->($download_url);
+    close $fh;
+  }
+  print "\n";
+
+  my $type
+    = $dist_file =~ /\.gz$/   ? 'z'
+    : $dist_file =~ /\.bz2$/  ? 'j'
+    : $dist_file =~ /\.xz$/   ? 'Z'
+                              : '';
+
+  print "Extracting... ";
+  {
+    my $cwd = Cwd::cwd();
+    chdir $extract_root;
+    system 'tar', 'x'.$type.'f', $dist_file and die "failed to extract";
+    chdir $cwd;
+  }
+  print "\n";
+
+  my ($extracted_dir) = glob($extract_root.'/*/');
+
+  my $cpan_dir = File::Spec->catdir($tempdir, File::Basename::basename($extracted_dir));
+  symlink $extracted_dir, $cpan_dir;
+  File::Spec->abs2rel($cpan_dir, $tempdir) . '/';
+};
+
+my $local_dir = do {
+  my $local_root = File::Spec->catdir($tempdir, 'local');
+  symlink $dist_dir, $local_root;
+  File::Spec->abs2rel($local_root, $tempdir) . '/';
+};
+
+my $cwd = Cwd::cwd();
+chdir $tempdir;
+system qw(git diff --no-index --no-prefix), @ARGV, '--', $extracted_dir, $local_dir;
+chdir $cwd;
+exit $?;
