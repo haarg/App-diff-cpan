@@ -12,6 +12,8 @@ use Cwd ();
 use Text::ParseWords ();
 use Config ();
 use IPC::Open3 ();
+use Getopt::Long qw(:config gnu_getopt require_order pass_through);
+use Pod::Usage ();
 
 sub run_capture {
   my @cmd = @_;
@@ -73,6 +75,14 @@ sub dist_name {
     $dist =~ s/-v?[0-9]+(?:\.[0-9_]+)+(?:-TRIAL|-RC[0-9]+)\z//;
   }
   return $dist;
+}
+
+Getopt::Long::GetOptions(
+  'h|help' => \my $help,
+) or Pod::Usage::pod2usage(2);
+
+if ($help) {
+  Pod::Usage::pod2usage(-exitval => 0, -verbose => 2);
 }
 
 my $dist;
@@ -175,3 +185,28 @@ chdir $tempdir;
 system qw(git diff --no-index --no-prefix), @ARGV, '--', $extracted_dir, $local_dir;
 chdir $cwd;
 exit $?;
+
+__END__
+
+=head1 NAME
+
+diff-cpan - Diff a dist between CPAN and local
+
+=head1 SYNOPSIS
+
+  # diff a build from the current directory with the latest CPAN release
+  $ diff-cpan
+
+  # diff a local directory with the latest CPAN release
+  $ diff-cpan Some-Local-Dir
+
+=head1 DESCRIPTION
+
+Get a diff between the a local dist and the latest CPAN release.
+
+=head1 OPTIONS
+
+All options are passed through to C<git diff>.  Some options may not be
+compatible with the way C<git diff> is invoked.
+
+=cut
