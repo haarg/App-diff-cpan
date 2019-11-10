@@ -92,6 +92,8 @@ sub dist_name {
   }
 }
 
+$|++;
+
 Getopt::Long::GetOptions(
   'h|help' => \my $help,
 ) or Pod::Usage::pod2usage(2);
